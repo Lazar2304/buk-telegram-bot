@@ -1,7 +1,11 @@
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-BOT_TOKEN = "8324420046:AAGfOcS504H4ZtPU0B2TwRITM0hiTwWj2_8"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # load .env file
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Zdravo! Ja sam zvanični bot BUK-a!")
