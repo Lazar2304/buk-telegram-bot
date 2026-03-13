@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 import os
@@ -9,39 +9,52 @@ from dotenv import load_dotenv
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# JSON fajl za čuvanje dugova
+# JSON fajl za čuvanje dugova i budžeta
 FILE = "dugovi.json"
 
 def load_data():
-    """Učitava podatke iz JSON fajla."""
     if not os.path.exists(FILE):
-        return {}
+        return {"dugovi": {}, "budzet": 0}
     with open(FILE, "r") as f:
         return json.load(f)
 
 def save_data(data):
-    """Čuva podatke u JSON fajl."""
     with open(FILE, "w") as f:
         json.dump(data, f)
 
 # --- Komande bota ---
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Postavljanje menija komandi u Telegramu
+    commands = [
+        BotCommand("help", "Prikaži pomoć"),
+        BotCommand("dug", "Dodaj dug članu"),
+        BotCommand("platio", "Smanji dug članu"),
+        BotCommand("stanje", "Prikaži stanje dugova"),
+        BotCommand("budzet", "Prikaži ukupni budžet"),
+        BotCommand("obrisi", "Obriši dug člana"),
+    ]
+    await context.bot.set_my_commands(commands)
+    await update.message.reply_text(
+        "Zdravo! Ja sam zvanični bot BUK-a!\n"
+        "Sve komande su sada dostupne kao dugmad."
+    )
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Zdravo! Ja sam zvanični bot BUK-a!\n\n"
         "Komande:\n"
-        "/help - prikaži ovu poruku\n"
         "/dug <ime> <iznos> - dodaj dug članu\n"
-        "/platio <ime> <iznos> - smanji dug članu\n"
-        "/stanje - prikaz svih dugova"
+        "/platio <ime> <iznos> - smanji dug članu i poveća budžet\n"
+        "/stanje - prikaz svih dugova\n"
+        "/budzet - prikaz ukupnog budžeta\n"
+        "/obrisi <ime> - uklanja dug člana bez dodavanja u budžet\n"
+        "/help - prikaži ovu poruku"
     )
 
 async def dug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
-
     if len(context.args) != 2:
         await update.message.reply_text("Upotreba: /dug <ime> <iznos>")
         return
-
     ime = context.args[0]
     try:
         iznos = int(context.args[1])
@@ -49,20 +62,18 @@ async def dug(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Iznos mora biti broj.")
         return
 
-    if ime not in data:
-        data[ime] = 0
+    if ime not in data["dugovi"]:
+        data["dugovi"][ime] = 0
 
-    data[ime] += iznos
+    data["dugovi"][ime] += iznos
     save_data(data)
-    await update.message.reply_text(f"{ime} sada duguje {data[ime]} dinara.")
+    await update.message.reply_text(f"{ime} sada duguje {data['dugovi'][ime]} dinara.")
 
 async def platio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
-
     if len(context.args) != 2:
         await update.message.reply_text("Upotreba: /platio <ime> <iznos>")
         return
-
     ime = context.args[0]
     try:
         iznos = int(context.args[1])
@@ -70,36 +81,56 @@ async def platio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Iznos mora biti broj.")
         return
 
-    if ime not in data:
+    if ime not in data["dugovi"]:
         await update.message.reply_text("Taj član ne postoji.")
         return
 
-    data[ime] -= iznos
+    data["dugovi"][ime] -= iznos
+    if data["dugovi"][ime] < 0:
+        data["dugovi"][ime] = 0
+
+    data["budzet"] += iznos  # plaćanjem povećava se budžet
     save_data(data)
-    await update.message.reply_text(f"{ime} sada duguje {data[ime]} dinara.")
+    await update.message.reply_text(f"{ime} sada duguje {data['dugovi'][ime]} dinara.\nUkupan budžet: {data['budzet']} dinara.")
 
 async def stanje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
-
-    if not data:
+    if not data["dugovi"]:
         await update.message.reply_text("Nema dugovanja.")
         return
-
     tekst = "📊 Dugovanja:\n"
-    for ime, dug in data.items():
+    for ime, dug in data["dugovi"].items():
         tekst += f"{ime}: {dug} din\n"
-
     await update.message.reply_text(tekst)
+
+async def budzet(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = load_data()
+    await update.message.reply_text(f"💰 Trenutni budžet: {data['budzet']} dinara.")
+
+async def obrisi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = load_data()
+    if len(context.args) != 1:
+        await update.message.reply_text("Upotreba: /obrisi <ime>")
+        return
+    ime = context.args[0]
+    if ime in data["dugovi"]:
+        data["dugovi"].pop(ime)
+        save_data(data)
+        await update.message.reply_text(f"Dug {ime} je obrisan bez dodavanja u budžet.")
+    else:
+        await update.message.reply_text("Taj član ne postoji.")
 
 # --- Main ---
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Dodavanje komandi
+    app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("dug", dug))
     app.add_handler(CommandHandler("platio", platio))
     app.add_handler(CommandHandler("stanje", stanje))
+    app.add_handler(CommandHandler("budzet", budzet))
+    app.add_handler(CommandHandler("obrisi", obrisi))
 
     print("Bot is running...")
     app.run_polling()
