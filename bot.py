@@ -1,9 +1,8 @@
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-
 import os
 import json
 from dotenv import load_dotenv
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # Učitavanje .env fajla
 load_dotenv()
@@ -14,18 +13,21 @@ FILE = "dugovi.json"
 
 def load_data():
     if not os.path.exists(FILE):
-        # kreira bazu samo ako fajl ne postoji
+        initial_data = {"dugovi": {}, "budzet": 0}
+        save_data(initial_data)
+        return initial_data
+    try:
+        with open(FILE, "r", encoding='utf-8') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
         return {"dugovi": {}, "budzet": 0}
-    with open(FILE, "r") as f:
-        return json.load(f)
 
 def save_data(data):
-    with open(FILE, "w") as f:
-        json.dump(data, f)
+    with open(FILE, "w", encoding='utf-8') as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
 # --- Komande bota ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Dugmad za komande
     keyboard = [
         ["/dug", "/platio"],
         ["/stanje", "/budzet"],
@@ -39,90 +41,101 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Komande:\n"
+        "📌 **Komande:**\n"
         "/dug <ime> <iznos> - dodaj dug članu\n"
-        "/platio <ime> <iznos> - smanji dug članu i poveća budžet\n"
+        "/platio <ime> <iznos> - smanji dug i poveća budžet\n"
         "/stanje - prikaz svih dugova\n"
         "/budzet - prikaz ukupnog budžeta\n"
-        "/obrisi <ime> - uklanja dug člana bez dodavanja u budžet\n"
+        "/obrisi <ime> - uklanja člana iz evidencije\n"
         "/help - prikaži ovu poruku"
     )
 
 async def dug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = load_data()
-    if len(context.args) != 2:
-        await update.message.reply_text("Upotreba: /dug <ime> <iznos>")
+    if len(context.args) < 2:
+        await update.message.reply_text("❌ Upotreba: /dug <ime> <iznos>")
         return
+    
     ime = context.args[0]
     try:
         iznos = int(context.args[1])
     except ValueError:
-        await update.message.reply_text("Iznos mora biti broj.")
+        await update.message.reply_text("❌ Iznos mora biti ceo broj.")
         return
 
-    if ime not in data["dugovi"]:
-        data["dugovi"][ime] = 0
-
-    data["dugovi"][ime] += iznos
+    data = load_data()
+    data["dugovi"][ime] = data["dugovi"].get(ime, 0) + iznos
     save_data(data)
-    await update.message.reply_text(f"{ime} sada duguje {data['dugovi'][ime]} dinara.")
+    
+    await update.message.reply_text(f"✅ {ime} sada duguje {data['dugovi'][ime]} dinara.")
 
 async def platio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = load_data()
-    if len(context.args) != 2:
-        await update.message.reply_text("Upotreba: /platio <ime> <iznos>")
+    if len(context.args) < 2:
+        await update.message.reply_text("❌ Upotreba: /platio <ime> <iznos>")
         return
+
     ime = context.args[0]
     try:
-        iznos = int(context.args[1])
+        iznos_uplate = int(context.args[1])
     except ValueError:
-        await update.message.reply_text("Iznos mora biti broj.")
+        await update.message.reply_text("❌ Iznos mora biti ceo broj.")
         return
 
+    data = load_data()
     if ime not in data["dugovi"]:
-        await update.message.reply_text("Taj član ne postoji.")
+        await update.message.reply_text(f"❓ Član '{ime}' ne postoji u evidenciji.")
         return
 
-    data["dugovi"][ime] -= iznos
-    if data["dugovi"][ime] < 0:
-        data["dugovi"][ime] = 0
-
-    data["budzet"] += iznos  # plaćanjem se povećava budžet
+    stari_dug = data["dugovi"][ime]
+    # Smanjujemo dug, ali ne ispod 0
+    novi_dug = max(0, stari_dug - iznos_uplate)
+    data["dugovi"][ime] = novi_dug
+    
+    # Budžet raste za onoliko koliko je plaćeno
+    data["budzet"] += iznos_uplate
     save_data(data)
+
     await update.message.reply_text(
-        f"{ime} sada duguje {data['dugovi'][ime]} dinara.\n"
-        f"Ukupan budžet: {data['budzet']} dinara."
+        f"💰 {ime} je platio {iznos_uplate} din.\n"
+        f"Preostali dug: {novi_dug} din.\n"
+        f"Ukupan budžet: {data['budzet']} din."
     )
 
 async def stanje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
-    if not data["dugovi"]:
-        await update.message.reply_text("Nema dugovanja.")
+    if not data["dugovi"] or all(v == 0 for v in data["dugovi"].values()):
+        await update.message.reply_text("🎉 Nema aktivnih dugovanja!")
         return
-    tekst = "📊 Dugovanja:\n"
-    for ime, dug in data["dugovi"].items():
-        tekst += f"{ime}: {dug} din\n"
+    
+    tekst = "📊 **Trenutna dugovanja:**\n"
+    for ime, dug_iznos in data["dugovi"].items():
+        if dug_iznos > 0:
+            tekst += f"• {ime}: {dug_iznos} din\n"
     await update.message.reply_text(tekst)
 
 async def budzet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
-    await update.message.reply_text(f"💰 Trenutni budžet: {data['budzet']} dinara.")
+    await update.message.reply_text(f"💰 **Trenutni budžet:** {data['budzet']} dinara.")
 
 async def obrisi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = load_data()
-    if len(context.args) != 1:
-        await update.message.reply_text("Upotreba: /obrisi <ime>")
+    if not context.args:
+        await update.message.reply_text("❌ Upotreba: /obrisi <ime>")
         return
+    
     ime = context.args[0]
+    data = load_data()
     if ime in data["dugovi"]:
-        data["dugovi"].pop(ime)
+        del data["dugovi"][ime]
         save_data(data)
-        await update.message.reply_text(f"Dug {ime} je obrisan bez dodavanja u budžet.")
+        await update.message.reply_text(f"🗑️ Podaci za {ime} su obrisani.")
     else:
-        await update.message.reply_text("Taj član ne postoji.")
+        await update.message.reply_text("❌ Taj član ne postoji.")
 
 # --- Main ---
 def main():
+    if not BOT_TOKEN:
+        print("Greška: BOT_TOKEN nije postavljen u .env fajlu!")
+        return
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_command))
@@ -133,7 +146,7 @@ def main():
     app.add_handler(CommandHandler("budzet", budzet))
     app.add_handler(CommandHandler("obrisi", obrisi))
 
-    print("Bot is running...")
+    print("Bot je pokrenut...")
     app.run_polling()
 
 if __name__ == "__main__":
