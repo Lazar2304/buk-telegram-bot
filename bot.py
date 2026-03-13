@@ -33,7 +33,7 @@ def get_chat_data(all_data, chat_id):
     return all_data[cid]
 
 async def get_valid_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Vraća ime korisnika: prioritet Reply > Mention > Pošiljalac (sam sebi)."""
+    """Vraća ime korisnika samo ako je Reply, Mention ili ako je unet samo broj (sam sebi)."""
     # 1. Provera preko Reply-a
     if update.message.reply_to_message:
         user = update.message.reply_to_message.from_user
@@ -43,12 +43,18 @@ async def get_valid_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.entities:
         for entity in update.message.entities:
             if entity.type == "mention":
-                mention_text = update.message.text[entity.offset:entity.offset+entity.length]
-                return mention_text
+                return update.message.text[entity.offset:entity.offset+entity.length]
 
-    # 3. Ako nema ničega, uzmi pošiljaoca (samog sebe)
-    user = update.message.from_user
-    return f"{user.first_name} (@{user.username})" if user.username else user.first_name
+    # 3. Ako ima samo jedan argument i to je broj, znači da korisnik dodaje dug samom sebi
+    if len(context.args) == 1:
+        try:
+            int(context.args[0]) # Provera da li je jedini argument zapravo iznos
+            user = update.message.from_user
+            return f"{user.first_name} (@{user.username})" if user.username else user.first_name
+        except ValueError:
+            return None # Uneta je reč koja nije mention, vraćamo None za grešku
+            
+    return None
 
 # --- Autocomplete ---
 async def post_init(application):
@@ -86,11 +92,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def dug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ime = await get_valid_user(update, context)
+    if not ime:
+        await update.message.reply_text("Upotreba: /dug <@korisnik> <iznos> ili samo /dug <iznos> za sebe.")
+        return
     try:
-        # Iznos je uvek poslednji argument
         iznos = int(context.args[-1])
     except (ValueError, IndexError):
-        await update.message.reply_text("Upotreba: /dug <@korisnik> <iznos>")
+        await update.message.reply_text("Iznos mora biti broj.")
         return
 
     chat_id = update.effective_chat.id
@@ -102,10 +110,13 @@ async def dug(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def platio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ime = await get_valid_user(update, context)
+    if not ime:
+        await update.message.reply_text("Upotreba: /platio <@korisnik> <iznos> ili samo /platio <iznos> za sebe.")
+        return
     try:
         iznos = int(context.args[-1])
     except (ValueError, IndexError):
-        await update.message.reply_text("Upotreba: /platio <@korisnik> <iznos>")
+        await update.message.reply_text("Iznos mora biti broj.")
         return
 
     chat_id = update.effective_chat.id
@@ -121,10 +132,13 @@ async def platio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def kasnjenje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ime = await get_valid_user(update, context)
+    if not ime:
+        await update.message.reply_text("Upotreba: /kasnjenje <@korisnik> <minuti> ili /kasnjenje <minuti> za sebe.")
+        return
     try:
         minuti = int(context.args[-1])
     except (ValueError, IndexError):
-        await update.message.reply_text("Upotreba: /kasnjenje <@korisnik> <minuti>")
+        await update.message.reply_text("Minuti moraju biti broj.")
         return
 
     kazna = minuti * 5
@@ -175,6 +189,9 @@ async def smanji_budzet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def obrisi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ime = await get_valid_user(update, context)
+    if not ime:
+        await update.message.reply_text("Upotreba: /obrisi <@korisnik> ili samo /obrisi za sebe.")
+        return
     chat_id = update.effective_chat.id
     all_data = load_data()
     data = get_chat_data(all_data, chat_id)
