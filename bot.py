@@ -49,7 +49,7 @@ async def post_init(application):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [["/dug", "/platio"], ["/kasnjenje", "/stanje"], ["/budzet", "/smanji_budzet"], ["/help"]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text("👋 Bot BUK-a spreman!", reply_markup=reply_markup)
+    await update.message.reply_text("👋 StaljinBot spreman!", reply_markup=reply_markup)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -112,7 +112,7 @@ async def stanje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for ime in svi_clanova:
         d = data["dugovi"].get(ime, 0)
         k = data["kasnjenja"].get(ime, 0)
-        tekst += f"{ime}: {d} din (Ukupno kasnjenje: {k} min)\n"
+        tekst += f"{ime}: {d} din (Ukupno kašnjenje: {k} min)\n"
     await update.message.reply_text(tekst)
 
 async def budzet(update: Update, context: ContextTypes.DEFAULT_TYPE):
