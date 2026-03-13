@@ -32,34 +32,41 @@ def get_chat_data(all_data, chat_id):
         all_data[cid] = {"dugovi": {}, "kasnjenja": {}, "budzet": 0}
     return all_data[cid]
 
-async def get_user_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Izvlači ime korisnika iz argumenta (@mention) ili reply-a."""
-    if update.message.reply_to_message:
-        user = update.message.reply_to_message.from_user
-        return f"{user.first_name} (@{user.username})" if user.username else user.first_name
+async def get_valid_user(update: Update):
+    """Vraća ime i prezime korisnika samo ako je @mention ili Reply."""
+    target_user = None
     
-    if context.args:
-        ime = context.args[0]
-        if ime.startswith('@'):
-            return ime
-        return ime
+    # 1. Provera preko Reply-a
+    if update.message.reply_to_message:
+        target_user = update.message.reply_to_message.from_user
+    # 2. Provera preko Mention-a u poruci
+    elif update.message.entities:
+        for entity in update.message.entities:
+            if entity.type == "mention":
+                # Izvlačimo korisnika iz mention-a (ovo radi samo ako je korisnik u grupi)
+                mention_text = update.message.text[entity.offset:entity.offset+entity.length]
+                # Napomena: Bot ne može uvek da dobije UserID samo iz @username teksta 
+                # osim ako korisnik nije tagovan. Zato koristimo tagovan tekst kao ključ.
+                return mention_text
+
+    if target_user:
+        return f"{target_user.first_name} (@{target_user.username})" if target_user.username else target_user.first_name
     return None
 
 # --- Autocomplete ---
 async def post_init(application):
-    # Slanje komandi bez username-a u sufixu
-    commands = [
+    # Postavljanje komandi bez sufiksa username-a bota
+    await application.bot.set_my_commands([
         BotCommand("start", "Pokreni bota"),
-        BotCommand("dug", "Dodaj dug: /dug ime iznos"),
+        BotCommand("dug", "Dodaj dug: /dug @korisnik iznos"),
         BotCommand("platio", "Smanji dug i poveća budžet"),
-        BotCommand("kasnjenje", "Dodaj minute: /kasnjenje ime minuti"),
+        BotCommand("kasnjenje", "Dodaj minute: /kasnjenje @korisnik minuti"),
         BotCommand("stanje", "Prikaži sva dugovanja i kasnjenja"),
         BotCommand("budzet", "Prikaži budžet"),
         BotCommand("smanji_budzet", "Trošenje iz budžeta: /smanji_budzet iznos"),
         BotCommand("obrisi", "Obriši člana"),
         BotCommand("help", "Uputstvo")
-    ]
-    await application.bot.set_my_commands(commands)
+    ])
 
 # --- Komande bota ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -72,23 +79,28 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Zdravo! Ja sam zvanični bot BUK-a!\n\n"
         "Komande:\n"
         "/help - prikaži ovu poruku\n"
-        "/dug <ime> <iznos> - dodaj dug članu\n"
-        "/platio <ime> <iznos> - smanji dug članu i povećaj budžet\n"
-        "/kasnjenje <ime> <minuti> - dodaj minute i automatski dug (5din/min)\n"
+        "/dug <@korisnik> <iznos> - dodaj dug članu\n"
+        "/platio <@korisnik> <iznos> - smanji dug članu i povećaj budžet\n"
+        "/kasnjenje <@korisnik> <minuti> - dodaj minute i automatski dug (5din/min)\n"
         "/stanje - prikaz svih dugova i ukupnog kašnjenja\n"
         "/budzet - prikaz trenutnog budžeta\n"
         "/smanji_budzet <iznos> - trošenje novca iz budžeta\n"
-        "/obrisi <ime> - briše člana iz baze"
+        "/obrisi <@korisnik> - briše člana iz baze"
     )
 
 async def dug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ime = await get_user_name(update, context)
-    try:
-        iznos = int(context.args[1]) if len(context.args) > 1 else int(context.args[0])
-    except (ValueError, IndexError):
-        await update.message.reply_text("Upotreba: /dug <ime> <iznos>")
+    ime = await get_valid_user(update)
+    if not ime:
+        await update.message.reply_text("Upotreba: /dug <@korisnik> <iznos> (ili reply na poruku)")
         return
     
+    try:
+        # Uzimamo poslednji argument kao iznos
+        iznos = int(context.args[-1])
+    except (ValueError, IndexError):
+        await update.message.reply_text("Iznos mora biti broj.")
+        return
+
     chat_id = update.effective_chat.id
     all_data = load_data()
     data = get_chat_data(all_data, chat_id)
@@ -97,13 +109,17 @@ async def dug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"{ime} sada duguje {data['dugovi'][ime]} dinara.")
 
 async def platio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ime = await get_user_name(update, context)
-    try:
-        iznos = int(context.args[1]) if len(context.args) > 1 else int(context.args[0])
-    except (ValueError, IndexError):
-        await update.message.reply_text("Upotreba: /platio <ime> <iznos>")
+    ime = await get_valid_user(update)
+    if not ime:
+        await update.message.reply_text("Upotreba: /platio <@korisnik> <iznos>")
         return
     
+    try:
+        iznos = int(context.args[-1])
+    except (ValueError, IndexError):
+        await update.message.reply_text("Iznos mora biti broj.")
+        return
+
     chat_id = update.effective_chat.id
     all_data = load_data()
     data = get_chat_data(all_data, chat_id)
@@ -116,13 +132,17 @@ async def platio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Taj član ne postoji.")
 
 async def kasnjenje(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ime = await get_user_name(update, context)
-    try:
-        minuti = int(context.args[1]) if len(context.args) > 1 else int(context.args[0])
-    except (ValueError, IndexError):
-        await update.message.reply_text("Upotreba: /kasnjenje <ime> <minuti>")
+    ime = await get_valid_user(update)
+    if not ime:
+        await update.message.reply_text("Upotreba: /kasnjenje <@korisnik> <minuti>")
         return
     
+    try:
+        minuti = int(context.args[-1])
+    except (ValueError, IndexError):
+        await update.message.reply_text("Minuti moraju biti broj.")
+        return
+
     kazna = minuti * 5
     chat_id = update.effective_chat.id
     all_data = load_data()
@@ -170,9 +190,9 @@ async def smanji_budzet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Budžet smanjen za {iznos}. Trenutno stanje: {data['budzet']} dinara.")
 
 async def obrisi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ime = await get_user_name(update, context)
+    ime = await get_valid_user(update)
     if not ime:
-        await update.message.reply_text("Upotreba: /obrisi <ime>")
+        await update.message.reply_text("Upotreba: /obrisi <@korisnik>")
         return
     chat_id = update.effective_chat.id
     all_data = load_data()
