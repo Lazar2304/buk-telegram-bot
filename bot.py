@@ -1,4 +1,4 @@
-from telegram import Update, BotCommand
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 import os
@@ -14,6 +14,7 @@ FILE = "dugovi.json"
 
 def load_data():
     if not os.path.exists(FILE):
+        # kreira bazu samo ako fajl ne postoji
         return {"dugovi": {}, "budzet": 0}
     with open(FILE, "r") as f:
         return json.load(f)
@@ -24,19 +25,16 @@ def save_data(data):
 
 # --- Komande bota ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Postavljanje menija komandi u Telegramu
-    commands = [
-        BotCommand("help", "Prikaži pomoć"),
-        BotCommand("dug", "Dodaj dug članu"),
-        BotCommand("platio", "Smanji dug članu"),
-        BotCommand("stanje", "Prikaži stanje dugova"),
-        BotCommand("budzet", "Prikaži ukupni budžet"),
-        BotCommand("obrisi", "Obriši dug člana"),
+    # Dugmad za komande
+    keyboard = [
+        ["/dug", "/platio"],
+        ["/stanje", "/budzet"],
+        ["/obrisi", "/help"]
     ]
-    await context.bot.set_my_commands(commands)
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
-        "Zdravo! Ja sam zvanični bot BUK-a!\n"
-        "Sve komande su sada dostupne kao dugmad."
+        "Zdravo! Ja sam zvanični bot BUK-a!\nIzaberi komandu dugmetom ili kucaj ručno.",
+        reply_markup=reply_markup
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -89,9 +87,12 @@ async def platio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data["dugovi"][ime] < 0:
         data["dugovi"][ime] = 0
 
-    data["budzet"] += iznos  # plaćanjem povećava se budžet
+    data["budzet"] += iznos  # plaćanjem se povećava budžet
     save_data(data)
-    await update.message.reply_text(f"{ime} sada duguje {data['dugovi'][ime]} dinara.\nUkupan budžet: {data['budzet']} dinara.")
+    await update.message.reply_text(
+        f"{ime} sada duguje {data['dugovi'][ime]} dinara.\n"
+        f"Ukupan budžet: {data['budzet']} dinara."
+    )
 
 async def stanje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
