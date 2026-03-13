@@ -14,7 +14,6 @@ FILE = "dugovi.json"
 
 # --- Rad sa podacima ---
 def load_data():
-    """Učitava sve podatke iz JSON fajla."""
     if not os.path.exists(FILE) or os.stat(FILE).st_size == 0:
         return {}
     try:
@@ -24,19 +23,31 @@ def load_data():
         return {}
 
 def save_data(data):
-    """Čuva sve podatke u JSON fajl."""
     with open(FILE, "w", encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 def get_chat_data(all_data, chat_id):
-    """Izvlači podatke specifične za chat_id (grupu)."""
     cid = str(chat_id)
     if cid not in all_data:
         all_data[cid] = {"dugovi": {}, "kasnjenja": {}, "budzet": 0}
     return all_data[cid]
 
+async def get_user_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Izvlači ime korisnika iz argumenta (@mention) ili reply-a."""
+    if update.message.reply_to_message:
+        user = update.message.reply_to_message.from_user
+        return f"{user.first_name} (@{user.username})" if user.username else user.first_name
+    
+    if context.args:
+        ime = context.args[0]
+        if ime.startswith('@'):
+            return ime
+        return ime
+    return None
+
 # --- Autocomplete ---
 async def post_init(application):
+    # Slanje komandi bez username-a u sufixu
     commands = [
         BotCommand("start", "Pokreni bota"),
         BotCommand("dug", "Dodaj dug: /dug ime iznos"),
@@ -71,31 +82,31 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def dug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 2:
+    ime = await get_user_name(update, context)
+    try:
+        iznos = int(context.args[1]) if len(context.args) > 1 else int(context.args[0])
+    except (ValueError, IndexError):
         await update.message.reply_text("Upotreba: /dug <ime> <iznos>")
         return
     
     chat_id = update.effective_chat.id
-    ime, iznos = context.args[0], int(context.args[1])
-    
     all_data = load_data()
     data = get_chat_data(all_data, chat_id)
-    
     data["dugovi"][ime] = data["dugovi"].get(ime, 0) + iznos
     save_data(all_data)
     await update.message.reply_text(f"{ime} sada duguje {data['dugovi'][ime]} dinara.")
 
 async def platio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 2:
+    ime = await get_user_name(update, context)
+    try:
+        iznos = int(context.args[1]) if len(context.args) > 1 else int(context.args[0])
+    except (ValueError, IndexError):
         await update.message.reply_text("Upotreba: /platio <ime> <iznos>")
         return
     
     chat_id = update.effective_chat.id
-    ime, iznos = context.args[0], int(context.args[1])
-    
     all_data = load_data()
     data = get_chat_data(all_data, chat_id)
-    
     if ime in data["dugovi"]:
         data["dugovi"][ime] = max(0, data["dugovi"][ime] - iznos)
         data["budzet"] += iznos
@@ -105,18 +116,17 @@ async def platio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Taj član ne postoji.")
 
 async def kasnjenje(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 2:
+    ime = await get_user_name(update, context)
+    try:
+        minuti = int(context.args[1]) if len(context.args) > 1 else int(context.args[0])
+    except (ValueError, IndexError):
         await update.message.reply_text("Upotreba: /kasnjenje <ime> <minuti>")
         return
     
-    chat_id = update.effective_chat.id
-    ime = context.args[0]
-    minuti = int(context.args[1])
     kazna = minuti * 5
-    
+    chat_id = update.effective_chat.id
     all_data = load_data()
     data = get_chat_data(all_data, chat_id)
-    
     data["kasnjenja"][ime] = data["kasnjenja"].get(ime, 0) + minuti
     data["dugovi"][ime] = data["dugovi"].get(ime, 0) + kazna
     save_data(all_data)
@@ -126,12 +136,10 @@ async def stanje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     all_data = load_data()
     data = get_chat_data(all_data, chat_id)
-    
     svi_clanova = set(list(data["dugovi"].keys()) + list(data["kasnjenja"].keys()))
     if not svi_clanova:
         await update.message.reply_text("Nema dugovanja.")
         return
-    
     tekst = "📊 Dugovanja:\n"
     for ime in svi_clanova:
         d = data["dugovi"].get(ime, 0)
@@ -146,33 +154,29 @@ async def budzet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"💰 Trenutni budžet: {data['budzet']} dinara.")
 
 async def smanji_budzet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 1:
+    if not context.args:
         await update.message.reply_text("Upotreba: /smanji_budzet <iznos>")
         return
     try:
         iznos = int(context.args[0])
-    except ValueError:
+    except:
         await update.message.reply_text("Iznos mora biti broj.")
         return
-    
     chat_id = update.effective_chat.id
     all_data = load_data()
     data = get_chat_data(all_data, chat_id)
-    
     data["budzet"] = max(0, data["budzet"] - iznos)
     save_data(all_data)
     await update.message.reply_text(f"Budžet smanjen za {iznos}. Trenutno stanje: {data['budzet']} dinara.")
 
 async def obrisi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
+    ime = await get_user_name(update, context)
+    if not ime:
         await update.message.reply_text("Upotreba: /obrisi <ime>")
         return
-    
     chat_id = update.effective_chat.id
-    ime = context.args[0]
     all_data = load_data()
     data = get_chat_data(all_data, chat_id)
-    
     if ime in data["dugovi"]: del data["dugovi"][ime]
     if ime in data["kasnjenja"]: del data["kasnjenja"][ime]
     save_data(all_data)
